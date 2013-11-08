@@ -1,0 +1,42 @@
+package beta;
+
+message base
+{
+    optional string type = 1;
+}
+
+message endpoint
+{
+    required string addr = 1;
+    required string next = 3;
+
+    optional string name = 2 [default = "<unnamed>"];
+}
+
+message heartbeat
+{
+    optional string   type       = 1 [default = "heartbeat"];
+    repeated endpoint endpoints  = 2;
+    required int32    cycles     = 3 [default = 0];
+    optional int32    created    = 4 [default = 0];
+}
+
+
+message join
+{
+    optional string   type = 1 [default = "join"];
+    required endpoint self = 2;
+}
+
+message drop
+{
+    optional string   type = 1 [default = "drop"];
+    required endpoint self = 2;   
+}
+
+message publish
+{
+    required endpoint origin  = 1;
+    required string   channel = 2;
+    required string   data    = 3;
+}

@@ -1,0 +1,189 @@
+#ifndef __INCLUDE_NETWORK_EVENT_CONTROLLER_H__
+#define __INCLUDE_NETWORK_EVENT_CONTROLLER_H__
+
+#include <vector>
+
+#include <network_event_loop.h>
+#include <heartbeat.pb.h>
+
+class network_event_controller : public network_event_loop {
+    private:
+        // handler registration
+        typedef void (network_event_controller::*event_handler)(std::string&);
+        std::map<std::string, event_handler> handlers_;
+
+        // heartbeat and routing
+        const char* self_;
+               int  next_;
+
+        std::vector<std::string> peers_;
+    public:
+        network_event_controller (const char* self, const char* next)
+        : network_event_loop(self, next)
+        , self_(self)
+        , next_(-1)
+        {
+            handlers_["heartbeat"] = &network_event_controller::heartbeat_event;
+            handlers_["join"]      = &network_event_controller::join_event;
+        }
+
+        ~network_event_controller() {}
+
+        void recv(std::string& protobuf)
+        {
+            beta::base base;
+            base.ParseFromString(protobuf);
+
+        //    std::cout << base.type() << "\n";
+
+            std::map<std::string, event_handler>::iterator it = handlers_.find(base.type());
+
+            if(it != handlers_.end())
+            {
+                (this->*(it->second))(protobuf);
+            }   
+            else
+            {
+                std::cout << "unknown packet type: " << base.type() << "\n";
+            }       
+        }
+
+        void wr_timeout()
+        {
+            if(peers_.size() > 1)
+            {
+                advance_next();
+            }
+            else
+            {
+                std::cout << "no peers\n";
+            }
+        }
+
+        void rd_timeout()
+        {
+            heartbeat_start();
+        }
+
+        void advance_next()
+        {
+            assert(peers_.size() > 0);
+
+            next_ = next_++ % peers_.size();
+
+            //std::cout << "update next to " << peers_[next_] << "\n";
+            init_outbox(peers_[next_].c_str());
+        }
+
+
+
+        void join_event(std::string& protobuf)
+        {
+            beta::join join;
+            join.ParseFromString(protobuf);
+
+            std::cout << join.self().addr() << " wants to join! #############################################\n";
+        }
+
+
+
+        void join_request()
+        {
+            beta::join join;
+
+            join.set_type("join");
+            join.mutable_self()->set_addr(self_);
+
+            this->send(join.SerializeAsString());
+        }
+
+
+
+
+
+
+
+
+
+
+        void heartbeat_event(std::string& protobuf)
+        {
+            beta::heartbeat heartbeat;
+            heartbeat.ParseFromString(protobuf);    
+
+          //  std::cout << "got heartbeat " << heartbeat.cycles() << "\n";  
+            int current_next = next_;
+            heartbeat_routing_update(heartbeat);
+
+            if(next_ != current_next)
+            {
+                advance_next();
+            }
+            
+   //         heartbeat_print(heartbeat);
+            heartbeat.set_cycles(heartbeat.cycles() + 1);
+
+            this->send(heartbeat.SerializeAsString());
+
+        }
+
+
+        void heartbeat_print(beta::heartbeat& heartbeat)
+        {
+            std::cout << "next     : " << next_ << "\n";
+
+            std::cout << "Protobuf : " << heartbeat.GetTypeName() << "\n";
+            std::cout << "cycles   : " << heartbeat.cycles() << std::endl;
+            std::cout << "endpoints: " << heartbeat.endpoints_size() << "\n";
+            for(int i = 0; i < heartbeat.endpoints_size(); i++)
+            {
+                std::cout << "\t" << heartbeat.endpoints(i).addr() << "\n";
+            }
+        }
+
+
+        void heartbeat_start()
+        {
+            beta::heartbeat heartbeat;
+
+            std::cout << "sending " << heartbeat.type() << " packet\n";
+
+            heartbeat.set_type("heartbeat");
+            heartbeat.set_cycles(0);
+            
+            this->send(heartbeat.SerializeAsString());
+        }
+
+
+
+
+
+        void heartbeat_routing_update(beta::heartbeat& heartbeat)
+        {
+            peers_.clear();
+            int pos = -1;
+
+            for(int i = 0; i < heartbeat.endpoints_size(); i++)
+            {
+                if(heartbeat.endpoints(i).addr() == self_)
+                {
+                    pos = i;
+                }
+                peers_.push_back(heartbeat.endpoints(i).addr());
+            }
+
+            if(pos < 0)
+            {
+                peers_.push_back(self_);
+                pos = peers_.size() - 1;
+
+                beta::endpoint* ep = heartbeat.add_endpoints();
+                ep->set_addr(self_);
+            }
+
+            next_ = (pos + 1) % heartbeat.endpoints_size();
+        }
+};
+
+
+#endif
