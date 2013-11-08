@@ -8,7 +8,7 @@
 #include <messages.pb.h>
 
 class network_event_controller : public network_event_loop {
-    private:
+    protected:
         // handler registration
         typedef void (network_event_controller::*event_handler)(std::string&);
         std::map<std::string, event_handler> handlers_;
@@ -24,8 +24,14 @@ class network_event_controller : public network_event_loop {
         int  last_heartbeat_;
 
     public:
-        network_event_controller (const char* self, const char* next)
-        : network_event_loop(self, next)
+
+        virtual void event(std::string&)
+        {
+            
+        }
+
+        network_event_controller (const char* self, const char* next, const char* pubsub)
+        : network_event_loop(self, next, pubsub)
         , self_(self)
         , joined_(false)
         , last_heartbeat_(0)
@@ -35,6 +41,8 @@ class network_event_controller : public network_event_loop {
             handlers_["drop"]      = &network_event_controller::drop_event;
 
             peers_[self] = next;
+
+            heartbeat_start();
             join_init();
         }
 
@@ -55,6 +63,7 @@ class network_event_controller : public network_event_loop {
             }   
             else
             {
+                event(protobuf);
                 std::cout << "unknown packet type: " << base.type() << "\n";
             }       
         }
@@ -179,7 +188,7 @@ class network_event_controller : public network_event_loop {
                 last_heartbeat_ = heartbeat.created();
 
                 heartbeat_routing_update(heartbeat);
-                heartbeat_print(heartbeat);
+                //heartbeat_print(heartbeat);
 
                 heartbeat.set_cycles(heartbeat.cycles() + 1);
 

@@ -8,18 +8,21 @@
 
 #include <nanomsg/nn.h>
 #include <nanomsg/pipeline.h>
+#include <nanomsg/pubsub.h>
 
 class network_event_loop
 {
     public:
-        network_event_loop (const char* self, const char* next)
+        network_event_loop (const char* self, const char* next, const char* pubsub)
         : pull_socket_(-1)
         , push_socket_(-1)
+        , publ_socket_(-1)
         , push_attempts_(0)
         , pull_attempts_(0)
         {
             init_inbox  (self);
             init_outbox (next);
+            init_publish(pubsub);
 
             std::cout << "Starting event loop...\n";
             std::cout << "Listening on " << self << std::endl;
@@ -28,6 +31,8 @@ class network_event_loop
         ~network_event_loop ()
         {
             nn_shutdown (push_socket_, 0);
+            nn_shutdown (pull_socket_, 0);
+            nn_shutdown (publ_socket_, 0);
         }
 
         virtual void recv(std::string&) = 0;
@@ -51,7 +56,7 @@ class network_event_loop
                  wr_message();
                 //if (wr_message())
                    //  std::cout << "sent message\n";
-                usleep(500);
+                usleep(1000);
             }
         }
 
@@ -82,6 +87,13 @@ class network_event_loop
                 push_errno_ = nn_errno ();
 
             //std::cout << "next = " << next << "\n";
+        }
+
+        void init_publish(const char* channel)
+        {
+            publ_socket_ = nn_socket (AF_SP, NN_PUB);
+            assert (publ_socket_ >= 0);
+            assert (nn_bind (publ_socket_, channel) >= 0);
         }
 
         bool connect (const char* bind, const char* next)
@@ -132,6 +144,8 @@ class network_event_loop
             if (!outbox_.empty ())
             {
                 std::string*& out = outbox_.front ();
+
+                broadcast(out);
                 
                 int bytes = nn_send (push_socket_, out->c_str (), out->size (), NN_DONTWAIT);
                     valid = (bytes == static_cast<int> (out->size ()));
@@ -154,6 +168,17 @@ class network_event_loop
             return valid;
         }
 
+        bool broadcast (std::string*& out)
+        {
+            int bytes = nn_send (publ_socket_, out->c_str (), out->size (), NN_DONTWAIT);
+            return (bytes == static_cast<int> (out->size ()));
+            // {
+            //     std::cout << "[channel] " << *out << std::endl;
+            //     return true;
+            // }
+            // return false;
+        }
+
 
         void execute ()
         {
@@ -161,6 +186,7 @@ class network_event_loop
                                inbox_.pop();
 
             recv(*in);
+
             delete in;
            // std::cout << "Queues: " << rd_size() << " " << wr_size() << "\n";
 
@@ -173,6 +199,7 @@ class network_event_loop
 
         int pull_socket_;
         int push_socket_;
+        int publ_socket_;
 
         int push_errno_;
         int pull_errno_;
